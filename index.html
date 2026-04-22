@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fresh Forward — Royalty Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F4F1EC; font-family: Georgia, serif; color: #1A1A1A; }
+  @keyframes fu { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  input, button, select { font-family: Georgia, serif; }
+  @media print { .np { display: none !important; } body { background: white; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useMemo } = React;
+
+const FRAGARIA = ["De Kemp", "Rapo", "Neessen", "Van Alphen"];
+
+const RATES = {
+  RumbaFH:0.027,   RumbaNFH:0.030,
+  SalsaFH:0.027,   SalsaNFH:0.030,
+  JiveFH:0.027,    JiveNFH:0.030,
+  AllegroFH:0.031, AllegroNFH:0.035,
+  VerdiFH:0.031,   VerdiNFH:0.035,
+  TwistFH:0.031,   TwistNFH:0.035,
+  SonataFH:0.031,  SonataNFH:0.035,
+  JenkkaFH:0.035,  JenkkaNFH:0.040,
+  RavelliaFH:0.035,RavelliaNFH:0.040,
+  CadenzaFH:0.035, CadenzaNFH:0.040,
+  ParlandoFH:0.043,ParlandoNFH:0.033,
+  OperaFH:0.043,   OperaNFH:0.033,
+  FandangoFH:0.085,FandangoNFH:0.085,
+  CalindaFH:0.034, CalindaNFH:0.039,
+  BaladaFH:0.034,  BaladaNFH:0.039,
+  BachataFH:0.034, BachataNFH:0.039,
+};
+
+const isFH = (n) => FRAGARIA.some(f => n.toLowerCase().includes(f.toLowerCase()));
+
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const sep = lines[0].includes(";") ? ";" : ",";
+  const headers = lines[0].split(sep).map(h => h.trim().replace(/^\uFEFF/, ""));
+  return lines.slice(1).map(line => {
+    const vals = line.split(sep);
+    const row = {};
+    headers.forEach((h, i) => { row[h] = (vals[i] || "").trim().replace(/^"|"$/g, ""); });
+    return row;
+  });
+}
+
+function pn(v) {
+  const n = parseFloat(String(v || "").replace(",", "."));
+  return isNaN(n) ? null : n;
+}
+
+function euros(n, d=2) {
+  if (n === null || n === undefined) return "—";
+  return new Intl.NumberFormat("nl-NL", { minimumFractionDigits:d, maximumFractionDigits:d }).format(n);
+}
+function ints(n) {
+  if (n === null || n === undefined) return "—";
+  return new Intl.NumberFormat("nl-NL").format(n);
+}
+
+function process(rows) {
+  const map = {};
+  for (const r of rows) {
+    const nursery = r["Current Nursery"] || "Onbekend";
+    const variety = r["Variety"] || "";
+    const qty = pn(r["Quantity Ordered"]);
+    if (!variety || qty === null || variety.startsWith("Nonprop")) continue;
+    const fh = isFH(nursery);
+    const key = `${variety}${fh ? "FH" : "NFH"}`;
+    const rate = RATES[key] ?? null;
+    if (!map[nursery]) map[nursery] = { isFH: fh, v: {} };
+    if (!map[nursery].v[variety]) map[nursery].v[variety] = { variety, qty:0, rate, key: fh?"FH":"NFH" };
+    map[nursery].v[variety].qty += qty;
+  }
+  return Object.fromEntries(
+    Object.entries(map).map(([name, d]) => {
+      const varieties = Object.values(d.v).sort((a,b) => a.variety.localeCompare(b.variety));
+      const grandTotal = varieties.reduce((s,v) => s + (v.rate !== null ? v.qty * v.rate : 0), 0);
+      const grandQty = varieties.reduce((s,v) => s + v.qty, 0);
+      return [name, { name, isFH:d.isFH, varieties, grandTotal, grandQty }];
+    })
+  );
+}
+
+const G = {
+  bg:"#F4F1EC", white:"#fff", border:"#DDD8CF",
+  fhDark:"#1E3A0F", fhMid:"#4A7825", fhLight:"#E8F2DC",
+  nfhDark:"#1A2E4A", nfhMid:"#2F5280", nfhLight:"#E0EAF5",
+  txt:"#1A1A1A", muted:"#6B6B6B", neg:"#B91C1C", negBg:"#FEF2F2",
+};
+
+function NurseryCard({ d, accent, pale, mid, idx }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{background:G.white, border:`1px solid ${G.border}`, borderRadius:12, overflow:"hidden", marginBottom:16, boxShadow:"0 2px 6px rgba(0,0,0,0.04)", animation:`fu 0.3s ease ${idx*40}ms both`}}>
+      <div onClick={() => setOpen(!open)} style={{background:accent, padding:"13px 20px", display:"flex", alignItems:"center", cursor:"pointer", gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex", alignItems:"center", gap:8}}>
+            <span style={{fontSize:16, fontWeight:700, color:"#fff"}}>{d.name}</span>
+            <span style={{fontSize:10, background:"rgba(255,255,255,0.18)", color:"#fff", padding:"2px 8px", borderRadius:10, fontWeight:700}}>
+              {d.isFH ? "🌱 FH" : "🏭 NFH"}
+            </span>
+          </div>
+          <div style={{fontSize:11, color:"rgba(255,255,255,0.6)", marginTop:2}}>{d.varieties.length} rassen · {ints(d.grandQty)} planten</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:20, fontWeight:800, color:"#D4EDAB", fontFamily:"monospace"}}>€ {euros(d.grandTotal)}</div>
+          <div style={{fontSize:11, color:"rgba(255,255,255,0.55)"}}>Totaal royalty</div>
+        </div>
+        <span style={{color:"rgba(255,255,255,0.5)", marginLeft:8}}>{open ? "▲" : "▼"}</span>
+      </div>
+
+      {open && (
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%", borderCollapse:"collapse", fontSize:13}}>
+            <thead>
+              <tr style={{background:pale}}>
+                {["Ras","Type","Tarief / stuk","Totaal planten","Totaal royalty",""].map(h => (
+                  <th key={h} style={{padding:"8px 16px", textAlign:["Ras","Type",""].includes(h)?"left":"right", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:"#888", borderBottom:"1px solid #ddd"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {d.varieties.map((v, i) => {
+                const noR = v.rate === null;
+                const isNeg = v.qty < 0;
+                const tot = noR ? null : v.qty * v.rate;
+                return (
+                  <tr key={v.variety} style={{background:isNeg?G.negBg:i%2===0?G.white:"#FAFAF8", borderBottom:"1px solid #eee"}}>
+                    <td style={{padding:"8px 16px", fontWeight:600}}>{v.variety}</td>
+                    <td style={{padding:"8px 16px"}}>
+                      <span style={{fontSize:11, background:pale, color:accent, padding:"2px 8px", borderRadius:10, fontWeight:700}}>{v.key}</span>
+                    </td>
+                    <td style={{padding:"8px 16px", textAlign:"right", fontFamily:"monospace", color:noR?"#aaa":mid}}>
+                      {noR ? <span style={{fontSize:11, color:"#aaa"}}>geen tarief</span> : `€ ${v.rate.toFixed(3)}`}
+                    </td>
+                    <td style={{padding:"8px 16px", textAlign:"right", fontFamily:"monospace", color:isNeg?G.neg:G.txt}}>{ints(v.qty)}</td>
+                    <td style={{padding:"8px 16px", textAlign:"right", fontFamily:"monospace", fontWeight:700, color:isNeg?G.neg:G.txt, fontSize:14}}>
+                      {noR ? "—" : `€ ${euros(tot)}`}
+                    </td>
+                    <td style={{padding:"8px 16px", width:20}}>
+                      {isNeg && <span title="Retour/correctie">↩️</span>}
+                      {noR && <span title="Geen tarief gevonden in template">⚠️</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{background:pale, borderTop:`2px solid ${accent}`}}>
+                <td colSpan={3} style={{padding:"10px 16px", fontWeight:700, color:accent, fontSize:14}}>Totaal</td>
+                <td style={{padding:"10px 16px", textAlign:"right", fontFamily:"monospace", fontWeight:700, color:accent}}>{ints(d.grandQty)}</td>
+                <td style={{padding:"10px 16px", textAlign:"right", fontFamily:"monospace", fontWeight:800, color:accent, fontSize:15}}>€ {euros(d.grandTotal)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [rows, setRows] = useState(null);
+  const [file, setFile] = useState("");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("all");
+  const [drag, setDrag] = useState(false);
+
+  const load = useCallback((f) => {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = e => { setRows(parseCSV(e.target.result)); setFile(f.name); setSearch(""); setTab("all"); };
+    r.readAsText(f, "utf-8");
+  }, []);
+
+  const data = useMemo(() => rows ? process(rows) : {}, [rows]);
+
+  const shown = useMemo(() => Object.fromEntries(
+    Object.entries(data).filter(([name, d]) => {
+      if (tab === "fh" && !d.isFH) return false;
+      if (tab === "nfh" && d.isFH) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (!name.toLowerCase().includes(q) && !d.varieties.some(v => v.variety.toLowerCase().includes(q))) return false;
+      }
+      return true;
+    })
+  ), [data, tab, search]);
+
+  const ns = Object.values(data);
+  const totalRoyalty = ns.reduce((s,n) => s + n.grandTotal, 0);
+  const totalQty = ns.reduce((s,n) => s + n.grandQty, 0);
+  const fhTotal = ns.filter(n => n.isFH).reduce((s,n) => s + n.grandTotal, 0);
+  const nfhTotal = ns.filter(n => !n.isFH).reduce((s,n) => s + n.grandTotal, 0);
+  const noRate = ns.reduce((s,n) => s + n.varieties.filter(v => v.rate === null).length, 0);
+
+  if (!rows) return (
+    <div style={{minHeight:"100vh", background:G.bg, padding:"40px 20px"}}>
+      <div style={{maxWidth:800, margin:"0 auto"}}>
+        <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:6}}>
+          <span style={{fontSize:30}}>🍓</span>
+          <h1 style={{fontSize:24, fontWeight:700, color:G.fhDark}}>Fresh Forward — Royalty Tool</h1>
+        </div>
+        <p style={{fontSize:13, color:G.muted, marginBottom:28}}>FH/NFH tarieven automatisch uit Omzetberekening 2025 template · Sleep een Plant Sale CSV-export in het vak hieronder</p>
+
+        <div
+          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={e => { e.preventDefault(); setDrag(false); load(e.dataTransfer.files[0]); }}
+          onClick={() => document.getElementById("_f").click()}
+          style={{border:`2px dashed ${drag?G.fhMid:G.border}`, borderRadius:12, padding:"48px 24px", textAlign:"center", background:drag?G.fhLight:G.white, cursor:"pointer", transition:"all 0.2s"}}>
+          <input id="_f" type="file" accept=".csv,.txt" style={{display:"none"}} onChange={e => load(e.target.files[0])} />
+          <div style={{fontSize:40, marginBottom:10}}>📂</div>
+          <div style={{fontSize:18, fontWeight:700, color:G.fhDark, marginBottom:6}}>Sleep Plant Sale CSV hierheen</div>
+          <div style={{fontSize:13, color:G.muted, marginBottom:16}}>of klik om te bladeren</div>
+          <div style={{display:"flex", justifyContent:"center", gap:8, flexWrap:"wrap"}}>
+            {FRAGARIA.map(n => <span key={n} style={{fontSize:11, background:G.fhLight, color:G.fhDark, padding:"3px 10px", borderRadius:20, fontWeight:700}}>🌱 {n}</span>)}
+            <span style={{fontSize:11, background:G.nfhLight, color:G.nfhDark, padding:"3px 10px", borderRadius:20, fontWeight:700}}>🏭 overige kwekers</span>
+          </div>
+        </div>
+
+        <div style={{marginTop:24, background:G.white, border:`1px solid ${G.border}`, borderRadius:10, overflow:"hidden"}}>
+          <div style={{padding:"12px 18px", background:"#F9F7F3", fontWeight:700, color:G.fhDark, fontSize:14, borderBottom:`1px solid ${G.border}`}}>📋 Tariefoverzicht</div>
+          <div style={{padding:16, overflowX:"auto"}}>
+            <table style={{width:"100%", borderCollapse:"collapse", fontSize:13}}>
+              <thead><tr>
+                <th style={{padding:"6px 12px", textAlign:"left", fontSize:11, fontWeight:700, textTransform:"uppercase", color:G.muted, borderBottom:`1px solid ${G.border}`}}>Ras</th>
+                <th style={{padding:"6px 12px", textAlign:"right", fontSize:11, fontWeight:700, textTransform:"uppercase", color:G.fhMid, borderBottom:`1px solid ${G.border}`}}>FH (Fragaria)</th>
+                <th style={{padding:"6px 12px", textAlign:"right", fontSize:11, fontWeight:700, textTransform:"uppercase", color:G.nfhMid, borderBottom:`1px solid ${G.border}`}}>NFH (overig)</th>
+              </tr></thead>
+              <tbody>
+                {Object.keys(RATES).filter(k => k.endsWith("FH")).map(k => {
+                  const ras = k.replace("FH","");
+                  return (
+                    <tr key={ras} style={{borderBottom:`1px solid ${G.border}`}}>
+                      <td style={{padding:"5px 12px", fontWeight:500}}>{ras}</td>
+                      <td style={{padding:"5px 12px", textAlign:"right", fontFamily:"monospace", color:G.fhMid}}>€ {RATES[`${ras}FH`].toFixed(3)}</td>
+                      <td style={{padding:"5px 12px", textAlign:"right", fontFamily:"monospace", color:G.nfhMid}}>{RATES[`${ras}NFH`] ? `€ ${RATES[`${ras}NFH`].toFixed(3)}` : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <p style={{marginTop:20, fontSize:12, color:G.muted, textAlign:"center"}}>
+          Fresh Forward Breeding &amp; Concepts · Royalty Tool 2025
+        </p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh", background:G.bg, padding:"32px 20px"}}>
+      <div style={{maxWidth:1100, margin:"0 auto"}}>
+
+        <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:4}}>
+          <span style={{fontSize:26}}>🍓</span>
+          <h1 style={{fontSize:22, fontWeight:700, color:G.fhDark}}>Fresh Forward — Royalty Factuuroverzicht</h1>
+        </div>
+
+        {/* File bar */}
+        <div className="np" style={{display:"flex", alignItems:"center", gap:10, padding:"9px 14px", background:G.fhLight, borderRadius:8, border:`1px solid ${G.border}`, marginBottom:20, marginTop:10}}>
+          <span>📄</span>
+          <span style={{fontWeight:700, color:G.fhDark, fontSize:13}}>{file}</span>
+          <span style={{color:G.muted, fontSize:13}}>· {rows.length} rijen</span>
+          <div style={{marginLeft:"auto", display:"flex", gap:8}}>
+            <button onClick={() => { setRows(null); setFile(""); }} style={{padding:"5px 12px", fontSize:12, borderRadius:6, cursor:"pointer", background:G.white, color:G.muted, border:`1px solid ${G.border}`}}>Nieuw bestand</button>
+            <button onClick={() => window.print()} style={{padding:"5px 12px", fontSize:12, borderRadius:6, cursor:"pointer", background:G.fhDark, color:"white", border:"none"}}>🖨 Afdrukken</button>
+          </div>
+        </div>
+
+        {/* Summary tiles */}
+        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:22}}>
+          {[
+            {l:"Totaal royalty", v:`€ ${euros(totalRoyalty)}`, i:"💶", bg:G.fhDark, c:"#D4EDAB", sc:"rgba(255,255,255,0.6)"},
+            {l:"Fragaria (FH)",  v:`€ ${euros(fhTotal)}`,      i:"🌱", bg:G.fhLight, c:G.fhDark},
+            {l:"Overige (NFH)", v:`€ ${euros(nfhTotal)}`,      i:"🏭", bg:G.nfhLight, c:G.nfhDark},
+            {l:"Planten totaal", v:ints(totalQty),             i:"🍓", bg:G.white,   c:G.txt},
+            ...(noRate > 0 ? [{l:"Geen tarief", v:noRate, i:"⚠️", bg:"#FEF3C7", c:"#92400E"}] : []),
+          ].map(({l,v,i,bg,c,sc}) => (
+            <div key={l} style={{background:bg, border:`1px solid ${G.border}`, borderRadius:10, padding:"13px 16px"}}>
+              <div style={{fontSize:20, marginBottom:4}}>{i}</div>
+              <div style={{fontSize:19, fontWeight:700, fontFamily:"monospace", color:c}}>{v}</div>
+              <div style={{fontSize:11, color:sc||G.muted, marginTop:2}}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Filter bar */}
+        <div className="np" style={{display:"flex", gap:10, marginBottom:18, flexWrap:"wrap"}}>
+          <input
+            placeholder="Zoek kweker of ras…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{flex:1, minWidth:180, padding:"8px 12px", border:`1px solid ${G.border}`, borderRadius:8, fontSize:14, background:G.white}}
+          />
+          {[["all","Alle kwekers"],["fh","🌱 Fragaria"],["nfh","🏭 Overig"]].map(([v,l]) => (
+            <button key={v} onClick={() => setTab(v)} style={{padding:"8px 14px", borderRadius:8, fontSize:13, cursor:"pointer",
+              background:tab===v?G.fhDark:G.white, color:tab===v?"#fff":G.txt, border:`1px solid ${tab===v?G.fhDark:G.border}`}}>{l}</button>
+          ))}
+        </div>
+
+        {/* Nursery cards */}
+        {Object.entries(shown).sort(([a],[b]) => a.localeCompare(b)).map(([name, d], idx) => {
+          const accent = d.isFH ? G.fhDark : G.nfhDark;
+          const pale   = d.isFH ? G.fhLight : G.nfhLight;
+          const mid    = d.isFH ? G.fhMid : G.nfhMid;
+          return <NurseryCard key={name} d={d} accent={accent} pale={pale} mid={mid} idx={idx} />;
+        })}
+
+        {Object.keys(shown).length === 0 && (
+          <div style={{textAlign:"center", padding:40, color:G.muted}}>Geen resultaten voor "{search}"</div>
+        )}
+
+        <p style={{marginTop:32, fontSize:12, color:G.muted, textAlign:"center"}}>
+          Fresh Forward Breeding &amp; Concepts · Royalty Tool 2025
+        </p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
